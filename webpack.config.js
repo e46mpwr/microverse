@@ -65,8 +65,12 @@ const config = {
                 { from: 'meta/version.txt', to: 'meta/version.txt'},
                 { from: 'apiKey.js', noErrorOnMissing: true },
                 { from: 'apiKey-dev.js', noErrorOnMissing: true },
+                { from: 'prelude.js'},
+                { from: 'basis/*', to: 'lib/',
+                  context: path.resolve(__dirname, "node_modules", "three", "examples", "jsm", "libs")
+                }
             ]
-        })
+        }),
     ],
 };
 
@@ -76,19 +80,11 @@ module.exports = (env, argv) => {
             minimize: true,
             minimizer: [
                 new TerserPlugin({
-                    minify: (file) => {
-                        console.log(Object.keys(file));
-                        if (!Object.keys(file)[0].startsWith("lib/")) {
-                            return {code: file[Object.keys(file)[0]]};
-                        }
-                        // https://github.com/mishoo/UglifyJS2#minify-options
-                        const uglifyJsOptions = {
-                            /* your `uglify-js` package options */
-                            keep_fnames: true
-                        };
-                        console.log("minify", Object.keys(file));
-                        return require("uglify-js").minify(file, uglifyJsOptions)
+                    exclude: /(behaviors|worlds)\//,
+                    terserOptions: {
+                        keep_fnames: true
                     },
+                    extractComments: false,
                 })
             ]
         };

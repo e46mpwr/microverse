@@ -4,7 +4,7 @@
 
 /* global VoxeetSDK */
 
-import { Data, ViewService, v3_equals, q_equals, q_yaw } from "@croquet/worldcore-kernel";
+import { Data, ViewService, v3_equals, q_equals, q_yaw } from "./worldcore";
 
 let chatAudioMuted = false; // this state has to persist through dormancy
 let userSelectedMicLabel = null; // ditto
@@ -32,7 +32,7 @@ export class DolbyChatManager extends ViewService {
         if (!window.dolbyPromise) {
             window.dolbyPromise = new Promise(resolve => {
                 const s = document.createElement('script');
-                s.setAttribute('src', 'https://unpkg.com/@voxeet/voxeet-web-sdk');
+                s.setAttribute('src', 'https://cdn.jsdelivr.net/npm/@voxeet/voxeet-web-sdk');
                 s.onload = async () => {
                     console.log("initialize Dolby SDK");
                     const accessToken = await getAccessToken();
@@ -116,7 +116,8 @@ console.log(`DolbyChatManager (local actor ${alreadyHere ? "already" : "not yet"
 </div>
 `;
             chatHolder = div.firstChild;
-            document.body.appendChild(chatHolder);
+            let microverse = document.body.querySelector("#microverse");
+            (microverse || document.body).appendChild(chatHolder);
 
             ['toggleConnection', 'toggleAudio', 'toggleSettings', 'toggleMicrophoneTest'].forEach(buttonName => {
                 const elem = document.getElementById(buttonName);
@@ -332,6 +333,7 @@ console.log(`DolbyChatManager (local actor ${alreadyHere ? "already" : "not yet"
         this.joinState = 'leaving';
         this.sessionP = null;
         this.myLastPosition = null;
+        if (!this.elements) {return;}
         this.elements.chatHolder.classList.add('unconnected');
         this.stopTestingMicrophone();
         this.stopTestingAudioLevel();
@@ -454,12 +456,7 @@ console.log(`DolbyChatManager (local actor ${alreadyHere ? "already" : "not yet"
         stream.getTracks().forEach(track => track.stop());
     }
 
-    stopAudioStream() {
-        if (this.measurableAudioStream) {
-            this.stopStream(this.measurableAudioStream);
-            delete this.measurableAudioStream;
-        }
-
+    stopMeasurableAudioStream() {
         if (this.measurableAudioStreamSource) {
             this.measurableAudioStreamSource.disconnect();
             delete this.measurableAudioStreamSource;
@@ -550,36 +547,34 @@ console.log(`DolbyChatManager (local actor ${alreadyHere ? "already" : "not yet"
 
         // how audio input works:
 
-        // we pass the selected device id to VoxeetSDK.  we also get the stream
-        // for the device, clone it, and from the clone make a mediaStreamSource
+        // we pass the selected device id to VoxeetSDK.  after that (because if
+        // we try *before*, at least on Chrome the stream provided to Voxeet will
+        // fail to support echo cancellation) we also get a stream for the device,
+        // and from it make a mediaStreamSource
         // (stored as this.measurableAudioStreamSource), which is connected to
         // the gainNode that was set up on initialisation.  the gainNode is
         // connected to a mediaStreamDestination node for local feedback testing
         // (this.testAudioNode), and to an analyser for measuring
         // local audio level.
 
-        // switching input device therefore involves
-        //   - requesting a stream from the specified device
-        //   - stopping the stream (if any) supplying local feedback
-        //   - making a mediaStreamSource from a clone of the new stream
-        //   - connecting the mediaStreamSource to the long-lived gainNode
+        console.log(`asking Voxeet to select device ID "${selectedId}"`);
+        const promise = this._setAudioInputPromise = VoxeetSDK.mediaDevice.selectAudioInput(selectedId)
+            .then(response => {
+                console.log("response from Voxeet:", response);
 
-        // jan 2021: avoid re-running getUserMedia on iPad, because there
-        // is only ever one audio input device, and a repeated getUserMedia
-        // causes the device to be somehow silenced (though not obviously
-        // muted, disabled, or ended).
-        let startPromise;
-        const isIPad = navigator.userAgent.match(/\biPad\b/);
-        const okToReplace = !isIPad || !this.chatAudioStream;
-        if (!okToReplace) {
-            console.log(`not invoking getUserMedia`);
-            startPromise = Promise.resolve(this.chatAudioStream);
-        } else {
-            console.log(`getUserMedia with device ID "${selectedId}"`);
-            startPromise = navigator.mediaDevices.getUserMedia({ audio: { deviceId: selectedId } });
-        }
-        const promise = this._setAudioInputPromise = startPromise
-            .then(stream => {
+                // jan 2021: avoid re-running getUserMedia on iPad - because there
+                // is only ever one audio input device, and a repeated getUserMedia
+                // causes the device to be somehow silenced (though not obviously
+                // muted, disabled, or ended).
+                const isIPad = navigator.userAgent.match(/\biPad\b/);
+                const okToReplace = !isIPad || !this.chatAudioStream;
+                if (!okToReplace) {
+                    console.log(`not invoking getUserMedia`);
+                    return this.chatAudioStream;
+                } else {
+                    return navigator.mediaDevices.getUserMedia({ audio: { deviceId: selectedId } });
+                }
+            }).then(stream => {
                 const chatAudioTrack = stream.getAudioTracks()[0];
                 const prevAudioTrack = this.chatAudioTrack;
                 if (!force && chatAudioTrack === prevAudioTrack) {
@@ -595,31 +590,14 @@ console.log(`DolbyChatManager (local actor ${alreadyHere ? "already" : "not yet"
                 chatAudioTrack.onunmute = () => {
                     console.log('audio track unmuted itself');
                 };
-                chatAudioTrack.onended = _event => {
-                    // if the track unexpectedly ends, it probably means
-                    // that something in the host's audio settings has
-                    // been changed or replaced.  force a refresh of
-                    // the audio input.
-                    console.warn("audio track ended");
-                    this.setAudioInput(true); // force re-init
-                };
 
-                // clone the stream (and its tracks) before using its track to
-                // create an Agora audio track.
-                const audioStreamClone = stream.clone();
-
-                // replace the cloned stream that feeds the
-                // level meter and the feedback test
-                this.stopAudioStream(); // also disconnects mediaStreamSource, if any
-                this.measurableAudioStream = audioStreamClone;
-                const mediaStreamSource = this.audioContext.createMediaStreamSource(audioStreamClone);
+                // replace the stream that feeds the level meter and the feedback
+                // test.
+                this.stopMeasurableAudioStream(); // disconnects mediaStreamSource, if any
+                const mediaStreamSource = this.audioContext.createMediaStreamSource(stream);
                 mediaStreamSource.connect(this.gainNode);
                 this.measurableAudioStreamSource = mediaStreamSource;
-                audioStreamClone.getAudioTracks()[0].onended = () => console.log(`local subsidiary audio track ended unexpectedly`);
 
-                VoxeetSDK.mediaDevice.selectAudioInput(selectedId).then(response => {
-                    console.log(response);
-                });
                 this.elements.toggleAudio.classList.remove('error');
                 this.mediaStarted = true;
             }).catch(err => {
@@ -635,6 +613,7 @@ console.log(`DolbyChatManager (local actor ${alreadyHere ? "already" : "not yet"
     async muteChatAudio() {
 console.log("muting local audio");
         await this.ensureAudioMuteState(true);
+        this.audioLevelChanged(0);
     }
 
     async unmuteChatAudio() {
@@ -658,11 +637,19 @@ console.log("unmuting local audio");
         this._testAudioLevelIntervalId = window.setInterval(this.testAudioLevel.bind(this), this._testAudioInterval);
     }
 
+    audioLevelChanged(level) {
+        this.publish(this.localPlayer.id, "voiceLevelChanged", level);
+    }
+
     testAudioLevel() {
         const audioLevel = this.getLocalAudioLevel();
 
+        if (!chatAudioMuted) {
+            this.audioLevelChanged(audioLevel);
+        }
+
         // no need to display audio level if the meter isn't on view.
-        if (this.elements.chatHolder.classList.contains('hide-settings') || !this.measurableAudioStream) return;
+        if (this.elements.chatHolder.classList.contains('hide-settings') || !this.measurableAudioStreamSource) return;
 
         if (this._maxAudioLevelLongTerm === undefined || audioLevel > this._maxAudioLevelLongTerm) {
             this._maxAudioLevelLongTerm = audioLevel;
@@ -746,7 +733,7 @@ console.log("unmuting local audio");
         console.log("DolbyChatMgr: destroy");
         this.stopTestingAudioLevel();
         try {
-            this.leaveConference().then(() => this.elements.chatHolder.remove());
+            this.leaveConference().then(() => this.elements?.chatHolder.remove());
         } catch(e) { /* ignore */ }
         activeManager = null; // stop handling events
         super.destroy();

@@ -3,6 +3,228 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+We generally group weekly changes into one dated entry on Fridays.
+
+## 2023-09-29
+### Added
+- WorldSaver is avaialbled in the Microverse global
+- sendToShell("hud", ...) to show and hide all DOM elements.
+
+## 2023-09-22
+### Fixed
+- guarding accessing localStorage property as it may throw an error.
+
+## 2023-09-15
+### Fixed
+- The path to load the basis library uses proper relative path.
+- The initial Three.js canvas size is properly set.
+- The touch based control button is properly styled, and it is hidden when gizmo is disabled.
+
+## 2023-09-08
+### Fixed
+- handle devicePixelRatio correctly when offsetX and offsetY are used in input manager.
+- Avoid having unnecessary nested iframes when replaceWorld is used.
+
+## 2023-09-01
+### Added
+- An easier way to disable double down to jump by adding Constants.PointerDoubleDownAction property.
+- More type declaration doc for vector functions.
+- actor.positionTo checks arguments to allow two args invocation.
+
+### Fixed
+- The Import feature properly disabled when dragAndDrop.js is not loaded
+- TypeScript module is loaded on demand from the core part of the system, not from prelude.js.
+
+## 2023-08-25
+### Added
+- allow non-full window Microverse in a browser window.
+
+### Fixed
+- The compiled behaviors are handled without writing into the model.
+
+## 2023-08-18
+### Added
+- You can use TypeScript to write a behavior. A behavior written in JS can use autocomplete available methods and properties.
+- The 3D events have the pressure property for input coming from pressure sensitive input devices.
+
+## 2023-08-11
+### Added
+- The nickname tag shows who is speaking over the dolby chat (thanks to Maksym Domaretskyi).
+
+### Changed
+- Allow an avatar to be "object" type without any visual appearances
+
+## 2023-08-04
+### Changed
+- Use Croquet OS 1.1.0-34
+- Move joystick into the Microverse iframe
+- Make the shell iframe optional
+
+### Added
+- prelude.js can used to customize the JS context before Microverse starts up.
+
+## 2023-07-28
+### Changed
+- Use THREE.js version 155.
+
+### Added
+- Support Meshopt decoder for GLB loading.
+
+## 2023-07-21
+### Added
+- Support a GLB model with KTX2 texture.
+- Add stopFalling message to AvatarModel to programmatically stop falling to ground.
+
+### Fixed
+- removeRigidBody should check if the physicsWorld is valid.
+- GLB URL is inferred when ReadyPlayerMe gallery image link is pasted.
+
+### Removed
+- Some examples are moved out to individual example repos.
+
+## 2023-07-14
+### Changed
+- Migrate to Three.js 152. A migration doc is addded.
+
+### Fixed
+- GLB loading from the Import menu now works.
+
+### Added
+- ReplaceWorld can take avatar data across transition.
+
+## 2023-07-07
+### Added
+- alphaTest property for 2D card to support translucent PNG.
+
+### Fixed
+- 2D image card with depth 0 can be used.
+
+## 2023-06-30
+### Fixed
+- Default csmLight.js properly publishes synchrnousCardLoaded event.
+
+## 2023-06-16
+### Changed
+- Mention npm create croquet-microverse in the README to indicate that this is the standard way to start a project.
+
+## 2023-06-09
+### Fixed
+- WalkManager.findIndex now uses the right format of data.
+
+## 2023-06-02
+
+### Added
+- Add support for High pixel density displays
+- Add the hidden property for a card that makes it invisible in the scene and ignore pointer events.
+
+## 2023-05-26
+
+### Fixed
+- Transfering, or ctrl-click on a different card while another already has gizmo, is fixed.
+
+
+## 2023-05-19
+### Changed
+- assetLoadError takes a serializable object as argument.
+- github workflow cleaned up.
+- Include a version of Worldcore in the repo.
+- Use Croquet OS 1.1.0-22.
+
+### Fixed
+- Make video saveable as vrse.
+
+### Added
+- Some vector functions.
+
+
+## 2023-05-12
+### Fixed
+- Some issues around full body avatars are ironed out.
+
+### Added
+- Sets can be stored in the persistent data.
+- the instanceId property is added to user events.
+- assetLoadError Behavior can show a load error image when asset file is not available.
+
+### Changed
+- Use THREE.js version 149.
+
+## 2023-05-05
+### Added
+- publish a message when asset loading fails
+- Ready Player Me full body avatar support is added.
+
+### Changed
+- use fillCacheIfAbsent more thoroughly
+
+## 2023-04-21
+### Changed
+- use terser and not uglify
+
+## 2023-04-14
+### Changed
+- wasd key down also make avatar start falling.
+- user input event handlers are made immediate.
+
+### Fixed
+- Gizmo rotation is made sane.
+
+## 2023-04-07
+### Fixed
+- Dolby.io echo cancellation is fixed by calling getUserMedia() carefully.
+
+### Changed
+- View side user event handling uses immediate event handling.
+
+### Added
+- Some documentations added.
+
+## 2023-02-10
+### Added
+- show hit point in XR
+
+## Changed
+- user count now says "visitors"
+
+### Fixed
+- make pointer up/down/move events work again in XR
+- log errors during event handlers instead of crashing
+
+## 2023-01-20
+### Changed
+- clean up some demo files (and create library version 0.3.9).
+
+## 2023-01-13
+### Changed
+- use jsdelivr instead of unpkg as the former is more stable.
+
+## 2023-01-06
+### Changed
+- Tweak Joystick behavior.
+
+## 2022-12-30
+
+## 2022-12-23
+### Added
+- log some information when shift-click the property sheet.
+- An option to specify scalar for rotateBy (to rotate around Y).
+
+### Fixed
+- Don't try to tear down Dolby audio when it was not built (when running on http).
+
+## 2022-12-16
+### Fixed
+- double down jump properly display the avatar at the new position.
+- DRACOLoader is loaded once per session, instead of every model load.
+- Don't try to start Dolby audio when running on http.
+
+### Changed
+- Remove some log messages
+
+### Added
+- THREE.js based PositionalAudio (ongoing).
+- Make "Enter VR button position customizable.
+
 ## 2022-12-09
 ### Changed
 - 3D models handle fullBright property.

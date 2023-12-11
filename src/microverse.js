@@ -4,7 +4,7 @@
 
 import {
     Constants, App, ModelRoot, ViewRoot, StartWorldcore,
-    InputManager, PlayerManager, q_euler} from "@croquet/worldcore-kernel";
+    InputManager, PlayerManager, q_euler} from "./worldcore";
 import { THREE, ThreeRenderManager } from "./ThreeRender.js";
 import { PhysicsManager } from "./physics.js";
 /*import { AgoraChatManager } from "./agoraChat.js"; */
@@ -17,20 +17,17 @@ import { AvatarActor, } from "./avatar.js";
 import { WalkManager } from "./walkManager.js"
 import { frameName, sendToShell, addShellListener } from "./frame.js";
 
-import { BehaviorModelManager, BehaviorViewManager, CodeLibrary, checkModule } from "./code.js";
+import {
+    BehaviorModelManager, BehaviorViewManager,
+    CodeLibrary, checkModule, compileToModule } from "./code.js";
 import { TextFieldActor } from "./text/text.js";
 import { PortalActor } from "./portal.js";
 import { WorldSaver } from "./worldSaver.js";
 import { startSettingsMenu } from "./settingsMenu.js";
 
-// apps -------------------------------------------
-import { MultiBlaster } from '../apps/multiblaster.js';
-
 import JSZip from 'jszip';
 import * as fflate from 'fflate';
 import {AssetManager} from "./wcAssetManager.js";
-// import {loadThreeJSLib} from "./ThreeJSLibLoader.js";
-//import {loadThreeLibs} from "../three/threeLibsLoader.js";
 
 const defaultAvatarNames = [
     "newwhite", "madhatter", "marchhare", "queenofhearts", "cheshirecat", "alice"
@@ -38,42 +35,100 @@ const defaultAvatarNames = [
 
 const defaultSystemBehaviorDirectory = "behaviors/croquet";
 const defaultSystemBehaviorModules = [
-    "avatarEvents.js", "billboard.js", "elected.js", "menu.js", "pdfview.js", "physics.js", "rapier.js", "scrollableArea.js", "singleUser.js", "stickyNote.js", "halfBodyAvatar.js", "propertySheet.js", "dragAndDrop.js", "gizmo.js"
+    "avatarEvents.js", "billboard.js", "elected.js", "menu.js", "pdfview.js", "physics.js", "rapier.js", "scrollableArea.js", "singleUser.js", "stickyNote.js", "halfBodyAvatar.js", "fullBodyAvatar.js", "propertySheet.js", "dragAndDrop.js", "gizmo.js", "video.js", "avatarVoiceLevel.js"
 ];
 
 let AA = true;
+let HighDPI = false;
 
 console.log("%cTHREE.REVISION:", "color: #f00", THREE.REVISION);
 
-async function getAntialias() {
+async function getDisplayOptions() {
     // turn off antialiasing for mobile and safari
     // Safari has exhibited a number of problems when using antialiasing. It is also extremely slow rendering webgl. This is likely on purpose by Apple.
     // Firefox seems to be dissolving in front of our eyes as well. It is also much slower.
     // mobile devices are usually slower, so we don't want to run those with antialias either. Modern iPads are very fast but see the previous line.
 
-    let urlOption = new URL(window.location).searchParams.get("AA");
-    if (urlOption) {
-        if (urlOption === "true") {
+    // allows to enable HighDPI rendering. uses more canvas pixel sizes but css scales it.
+
+    let aa;
+    let highdpi;
+
+    let aaOption = new URL(window.location).searchParams.get("AA");
+    if (aaOption === null) {
+        aaOption = window.microverseAAOption === undefined
+            ? null
+            : window.microverseAAOption === true ? "true" : window.microverseAAOption;
+    }
+
+    if (aaOption !== null) {
+        if (aaOption === "true") {
             console.log(`antialias is true, urlOption AA is set`);
-            return true;
+            aa = true;
         } else {
             console.log(`antialias is false, urlOption AA is unset`);
-            return false;
+            aa = false;
         }
     }
+
+    let dpiOption = new URL(window.location).searchParams.get("HighDPI");
+
+    if (dpiOption === null) {
+        dpiOption = window.microverseHighDPIOption === undefined
+            ? null
+            : window.microverseHighDPIOption === true ? "true" : window.microverseHighDPIOption;
+    }
+
+    if (dpiOption) {
+        if (dpiOption === "true") {
+            console.log(`HighDPI is true, urlOption HighDPI is set`);
+            highdpi = true;
+        } else {
+            console.log(`HighDPI is false, urlOption HighDPI is unset`);
+            highdpi = false;
+        }
+    }
+
     const isSafari = navigator.userAgent.includes("Safari") && !navigator.userAgent.includes("Chrome");
     const isFirefox = navigator.userAgent.includes("Firefox");
     const isMobile = !!("ontouchstart" in window);
 
     // the code below looks redundant, but let us keep it so that we remember what to do when
     // we change our mind again.
-    let aa = true;
-    if (isMobile) {
-        aa = false;
-    } else if (isSafari && isMobile) {
-        aa = false;
-    } else if (isFirefox) {
-        aa = true;
+
+    if (highdpi === undefined) {
+        let showcase = window.showcase;
+        if (showcase) {
+            highdpi = showcase.highDPI !== undefined ? showcase.highDPI : true;
+        }
+    }
+
+    if (aa === undefined) {
+        if (isMobile) {
+            aa = false;
+        } else if (isSafari && isMobile) {
+            aa = false;
+        } else if (isFirefox) {
+            aa = true;
+        } else {
+            aa = true;
+            // when there is no url option, deafults to true
+        }
+    }
+
+    if (highdpi === undefined) {
+        highdpi = false;
+        /*
+          if (isMobile) {
+          highdpi = false;
+          } else if (isSafari && isMobile) {
+          highdpi = false;
+          } else if (isFirefox) {
+          highdpi = true;
+          } else {
+          // when there is no url option, deafults to true
+          }
+        */
     }
 
     try {
@@ -81,8 +136,8 @@ async function getAntialias() {
         if (supported) {aa = supported;}
     } catch (_) { /* ignore */ }
 
-    console.log(`antialias is ${aa}, mobile: ${isMobile}, browser: ${isFirefox ? "Firefox" : isSafari ? "Safari" : "Other Browser"}`);
-    return aa;
+    console.log(`antialias is ${aa}, highDPI is ${highdpi}, mobile: ${isMobile}, browser: ${isFirefox ? "Firefox" : isSafari ? "Safari" : "Other Browser"}`);
+    return {AA: aa, HighDPI: highdpi};
 }
 
 function loadLoaders() {
@@ -126,29 +181,28 @@ function loadInitialBehaviors(paths, directory) {
 
     let promises = paths.map((path) => {
         if (!isSystem) {
-            let code = `import('${root}${directory}/${path}')`;
-            return eval(code).then((module) => {
-                let rest = directory.slice("behaviors".length);
-                if (rest[0] === "/") {rest = rest.slice(1);}
-                return [`${rest === "" ? "" : (rest + "/")}${path}`, module];
-            })
+            let match = /\/?behaviors\/(.*)/.exec(directory);
+            let dir = match ? match[1] : directory;
+            return fetch(`${root}${directory}/${path}`)
+                .then((res) => res.text())
+                .then((text) => compileToModule(text, `${dir}/${path}`));
         } else {
             let modulePath = `${directory.split("/")[1]}/${path}`;
-            let code = `import('${root}behaviors/${modulePath}')`;
-            return eval(code).then((module) => {
-                return [modulePath, module];
-            })
+            return fetch(`${root}behaviors/${modulePath}`)
+                .then((res) => res.text())
+                .then((text) => compileToModule(text, modulePath));
         }
     });
 
     return Promise.all(promises).then((array) => {
-        array.forEach((pair) => {
-            let [path, module] = pair;
-            let dot = path.lastIndexOf(".");
-            let fileName = path.slice(0, dot);
+        array.forEach((obj) => {
+            let {name, data} = obj;
+            let dot = name.lastIndexOf(".");
+            let fileName = name.slice(0, dot);
+            let language = name.slice(dot + 1);
 
-            checkModule(module); // may throw an error
-            library.add(module.default, fileName, isSystem);
+            checkModule(data); // may throw an error
+            library.add(data.default, fileName, isSystem, language);
         });
         return true;
     });
@@ -368,7 +422,7 @@ class MyPlayerManager extends PlayerManager {
         }
     }
 
-    playerEnteredWorld(player) {
+    playerEnteredWorld(_player) {
         // console.log(frameName(), "playerEnteredWorld", player);
         this.publish("playerManager", "playerCountChanged");
     }
@@ -411,7 +465,6 @@ class MyModelRoot extends ModelRoot {
     init(options, persistentData) {
         super.init(options);
         let appManager = this.service("MicroverseAppManager");
-        appManager.add(MultiBlaster);
         appManager.add(TextFieldActor);
         appManager.add(PortalActor);
 
@@ -427,14 +480,16 @@ class MyModelRoot extends ModelRoot {
         if (persistentData) {
             console.log("loading persistent data");
             this.loadPersistentData(persistentData);
-            return;
+            if (Constants.ShowCaseSpec) {
+                this.publish(this.sessionId, "disableCodeLoadFlag");
+            }
+        } else {
+            this.loadBehaviorModules(Constants.Library.modules, "1");
+            if (Constants.ShowCaseSpec) {
+                this.publish(this.sessionId, "disableCodeLoadFlag");
+            }
+            this.load(Constants.DefaultCards, "1");
         }
-
-        this.loadBehaviorModules(Constants.Library.modules, "1");
-        if (Constants.ShowCaseSpec) {
-            this.publish(this.sessionId, "disableCodeLoadFlag");
-        }
-        this.load(Constants.DefaultCards, "1");
     }
 
     ensurePersistenceProps() {
@@ -665,9 +720,9 @@ function setupBroadcastMode(model) {
 
 class MyViewRoot extends ViewRoot {
     static viewServices() {
-        const services = [
+        let services = [
             InputManager,
-            {service: ThreeRenderManager, options:{useBVH: true, antialias: AA}},
+            {service: ThreeRenderManager, options:{useBVH: true, antialias: AA, useDevicePixelRatio: HighDPI}},
             AssetManager,
             KeyFocusManager,
             FontViewManager,
@@ -687,8 +742,6 @@ class MyViewRoot extends ViewRoot {
         super(model);
         const threeRenderManager = this.service("ThreeRenderManager");
         const renderer = threeRenderManager.renderer;
-        window.scene = threeRenderManager.scene;
-
         this.service("FontViewManager").setModel(model.service("FontModelManager"));
 
         renderer.toneMapping = THREE.ReinhardToneMapping;
@@ -708,8 +761,13 @@ class MyViewRoot extends ViewRoot {
         let cards = [...actorManager.actors].filter((a) => a[1].isCard).map(a => a[1]);
         this.synchronousLoadCards = cards.filter((c) => c._cardData.loadSynchronously);
 
-        if (this.synchronousLoadCards) {
+        if (this.synchronousLoadCards.length > 0) {
             this.notLoadedSynchronousCards = new Set(this.synchronousLoadCards.map(c => c.id));
+            this.readyToLoadPromise = new Promise((resolve, _reject) => {
+                this.readyToLoadPromiseResolver = resolve;
+            });
+        } else {
+            this.readyToLoadPromise = Promise.resolve(true);
         }
 
         this.subscribe(this.sessionId, "synchronousCardLoaded", "synchronousCardLoaded");
@@ -717,6 +775,8 @@ class MyViewRoot extends ViewRoot {
         if (broadcasting) this.publish(this.sessionId, "addBroadcaster", this.viewId);
         if (Constants.ShowCaseSpec && !model.persistentDataDisabled) this.publish(this.sessionId, "setPersistentDataFlag", false);
         window.viewRoot = this; // used by getViewRoot() function
+        // defar creating pawns until properties in this object is set up
+        this.service("PawnManager").spawnPawns();
     }
 
     detach() {
@@ -752,7 +812,11 @@ class MyViewRoot extends ViewRoot {
         let id = data.id;
         this.notLoadedSynchronousCards.delete(id);
         if (this.notLoadedSynchronousCards.size === 0) {
-            this.publish(this.sessionId, "allSynnchronousCardsLoaded");
+            this.publish(this.sessionId, "allSynchronousCardsLoaded");
+            if (this.readyToLoadPromiseResolver) {
+                console.log("resolving load promise");
+                this.readyToLoadPromiseResolver(this);
+            }
         }
     }
 }
@@ -850,48 +914,9 @@ function isRunningLocalNetwork() {
     return false;
 }
 
-export function startMicroverse() {
-    let setButtons = (display) => {
-        ["homeBtn", "worldMenuBtn"].forEach((n) => {
-            let btn = document.querySelector("#" + n);
-            if (btn) {
-                btn.style.display = display;
-            }
-        });
-    };
-
-    // let showcase = Constants.ShowCaseSpec;
-    // Constants is not initialized yet, as Croquet session has not been started.
-    let showcase = window.showcase;
-
-    sendToShell("hud", {joystick: false, fullscreen: false});
-    setButtons("none");
-
-    const configPromise = new Promise(resolve => resolveConfiguration = resolve)
-        .then(localConfig => {
-            window.settingsMenuConfiguration = { ...localConfig };
-            return !localConfig.showSettings || localConfig.userHasSet
-                ? false // as if user has run dialog with no changes
-                : new Promise(resolve => startSettingsMenu(true, showcase && !showcase.useAvatar, resolve));
-        });
-    sendToShell("send-configuration");
-
-    return configPromise.then(changed => {
-        if (changed) sendToShell("update-configuration", { localConfig: window.settingsMenuConfiguration });
-        if (!showcase) {
-            sendToShell("hud", {joystick: true, fullscreen: true});
-            setButtons("flex");
-        }
-        return getAntialias();
-    }).then((aa) => {
-        AA = aa;
-        launchMicroverse();
-    });
-}
-
 async function launchMicroverse() {
     if (window.microverseInitFunction) {
-        return window.microverseInitFunction(startWorld, Constants);
+        return window.microverseInitFunction(startWorld, { Constants, App });
     }
     let {baseurl, basename} = basenames();
 
@@ -974,3 +999,43 @@ const shellListener = (command, data) => {
     }
 };
 addShellListener(shellListener);
+
+export function startMicroverse() {
+    let setButtons = (display) => {
+        ["homeBtn", "worldMenuBtn"].forEach((n) => {
+            let btn = document.querySelector("#" + n);
+            if (btn) {
+                btn.style.display = display;
+            }
+        });
+    };
+
+    // let showcase = Constants.ShowCaseSpec;
+    // Constants is not initialized yet, as Croquet session has not been started.
+    let showcase = window.showcase;
+
+    sendToShell("hud", {joystick: false, fullscreen: false});
+    setButtons("none");
+
+    const configPromise = new Promise(resolve => resolveConfiguration = resolve)
+        .then(localConfig => {
+            window.settingsMenuConfiguration = { ...localConfig };
+            return !localConfig.showSettings || localConfig.userHasSet
+                ? false // as if user has run dialog with no changes
+                : new Promise(resolve => startSettingsMenu(true, showcase && !showcase.useAvatar, resolve));
+        });
+    sendToShell("send-configuration");
+
+    return configPromise.then(changed => {
+        if (changed) sendToShell("update-configuration", { localConfig: window.settingsMenuConfiguration });
+        if (!showcase) {
+            sendToShell("hud", {joystick: true, fullscreen: true});
+            setButtons("flex");
+        }
+        return getDisplayOptions();
+    }).then((options) => {
+        AA = options.AA;
+        HighDPI = options.HighDPI;
+        launchMicroverse();
+    });
+}

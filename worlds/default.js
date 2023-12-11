@@ -9,7 +9,7 @@ export function init(Constants) {
 
     Constants.UserBehaviorDirectory = "behaviors/default";
     Constants.UserBehaviorModules = [
-        "demo.js", "lights.js", "bouncingBall.js", "bitcoinTracker.js", "spin.js", "openPortal.js", "urlLink.js", "cradle.js", // "pendulum.js"
+        "lights.js", "bouncingBall.ts", "bitcoinTracker.ts", "openPortal.js", "urlLink.js", "cradle.js"
     ];
 
     const frameColor = 0x888888;
@@ -29,12 +29,13 @@ export function init(Constants) {
                 name:"world model",
                 type: "3d",
                 fileName: "/artgallery_042122.glb.zip",
-                dataLocation: "3gkoR_36xHp5-TB2swDY0iqUyhSXz2JwqpQnlM7mfYVgDxMTFxRdSEgBDgsCFEkSFEkEFQgWEgITSQ4ISBJIIAMxBR4LLhQmDDYEJT8DVCAfBhEeEDIsMD4-VUgOCEkEFQgWEgITSQoOBBUIEQIVFAJIVSoPLiM9MAINDgQAM1YWUAMoHVEjEgw1Pw4qJVZKDg0sJCNVKT4DCiwFLkgDBhMGSCQGVl8xNCQqSkoKUi8vIQkOPy4WXx0NKi8DChUvJjEVVlUyLAAdEVItMFc",
+                dataLocation: "./assets/3D/artgallery_042122.glb.zip",
                 singleSided: true,
                 shadow: true,
                 layers: ["walk"],
                 translation:[0, -1.7, 0],
                 dataScale:[1,1,1],
+                loadSynchronously: true,
 
                 placeholder: true,
                 placeholderSize: [400, 0.1, 400],
@@ -49,8 +50,10 @@ export function init(Constants) {
                 type: "lighting",
                 behaviorModules: ["Light"],
                 fileName: "/shanghai_riverside_2k.exr",
-                dataLocation: "32nxXNZxuyT3h-bh0OX-2uMdBRJ0WmDduuTJwwewEE60WkZGQkEIHR1UW15XQRxHQRxRQF1DR1dGHFtdHUcddVZkUEtee0FzWWNRcGpWAXVKU0RLRWd5ZWtrAB1bXRxRQF1DR1dGHF9bUUBdRFdAQVcdAH9ae3ZoZVdYW1FVZgNDBVZ9SAR2R1lgalt_cAMfW1h5cXYAfGtWX3lQex1WU0ZTHXVreUhtUEFeU218aAYDRVxqAHB_Rn5YZmFFZWsAZERtWHF_WkIGZEtRdnM",
+                dataLocation: "./assets/sky/shanghai_riverside_2k.exr",
                 dataType: "exr",
+                toneMappingExposure: 0.7,
+                loadSynchronously: true,
             }
         },
         {
@@ -137,7 +140,7 @@ export function init(Constants) {
                 layers: ["pointer"],
                 type: "2d",
                 dataLocation: "./assets/SVG/full-circle.svg",
-                textureType: "dynamic",
+                textureType: "canvas",
                 textureWidth: 1024,
                 textureHeight: 1024,
                 frameColor: frameColor,
@@ -204,8 +207,9 @@ export function init(Constants) {
                 type: "text",
                 runs: [{text: "\nWelcome to the Croquet Gallery!\n"}],
                 margins: {left: 20, top: 20, right: 20, bottom: 20},
-                backgroundColor: 0xf4e056,
+                backgroundColor: 0xc4a836,
                 color: 0x000000,
+                fullBright: true,
                 //color: 0xf4e056,
                 frameColor: frameColor,
                 width: 2,

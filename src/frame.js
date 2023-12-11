@@ -16,12 +16,22 @@ export function frameName() {
     return `frame["${worldName}",${frameId}${isPrimaryFrame ? ",primary" : ""}]`;
 }
 
+import {setButtonsVisibility} from "./hud.js";
+
 // shared prefix for shell messages
 const PREFIX = "croquet:microverse:";
 
 // sending to shell
 export function sendToShell(command, args) {
-    window.parent.postMessage({ message: PREFIX+command, ...args }, "*");
+    let check = window.microverseEnablePortal || (window.microverseFrameTypeReceived && command === "world-replace");
+    let target = check ? window.parent : window;
+
+    // a bit of hack. It has to deal with buttons in this frame and also owner
+    if (window.microverseEnablePortal && command === "hud") {
+        setButtonsVisibility(args);
+    }
+
+    target.postMessage({ message: PREFIX + command, ...args }, "*");
 }
 
 // registry of callback functions to receive from shell
@@ -38,8 +48,10 @@ export function removeShellListener(fn) {
 // we register one global event listener for all messages from the shell
 // that invokes all callbacks in the registry
 // This guaranteees the order in which they will be invoked
+
 window.addEventListener("message", e => {
-    if (e.source === window.parent) {
+    let target = window.microverseEnablePortal ? window.parent : window;
+    if (e.source === target) {
         const { message }  = e.data;
         if (typeof message === "string" && message.startsWith(PREFIX)) {
             const command = message.slice(PREFIX.length);
@@ -58,7 +70,7 @@ const primaryListener = (command, data) => {
         if (isPrimaryFrame !== primary) {
             isPrimaryFrame = primary;
             document.body.style.background = "transparent";
-            document.getElementById("hud").classList.toggle("primary-frame", isPrimaryFrame);
+            document.getElementById("hud")?.classList.toggle("primary-frame", isPrimaryFrame);
             if (isPrimaryFrame) window.focus();
             sendToShell("frame-ready", { frameType });
         }

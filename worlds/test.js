@@ -21,7 +21,7 @@ export function init(Constants) {
 
     Constants.UserBehaviorDirectory = "behaviors/default";
     Constants.UserBehaviorModules = [
-        "csmLights.js"
+        "lights.js"
     ];
 
     Constants.DefaultCards = [
@@ -35,7 +35,7 @@ export function init(Constants) {
                 translation:[0, -1.7, 0],
                 placeholder: true,
                 placeholderSize: [400, 0.1, 400],
-                placeholderColor: 0x808080,
+                placeholderColor: 0xe0e0e0,
                 placeholderOffset: [0, 0, 0],
             }
         },
@@ -48,7 +48,8 @@ export function init(Constants) {
                 dataLocation: "3OF2-s4U1ZOJduGATmLEIXo1iTkQHd5ZBknKgL5SvqpQJzs7Pzx1YGApJiMqPGE6PGEsPSA-Oio7YSYgYDpgCCsZLTYjBjwOJB4sDRcrfAg3Ljk2OBoEGBYWfWAmIGEsPSA-Oio7YSImLD0gOSo9PCpgPwB9AAIIISx8YiYneScqKyQaIisNLHkaGT8YKg56JQwQfHstPiNiGQ49e2ArLjsuYCMBPgMiCQt3OQskGhcleSp9HQIIfXseHgo7EAo9CB48FRwpegsCLH4OIwY",
                 fileName: "/abandoned_parking_4k.jpg",
                 dataType: "jpg",
+                toneMappingExposure: 1.2
             }
-        },
+        }
     ];
 }

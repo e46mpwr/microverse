@@ -1,10 +1,22 @@
-class LightPawn {
+// the following import statement is solely for the type checking and
+// autocompletion features in IDE.  A Behavior cannot inherit from
+// another behavior or a base class but can use the methods and
+// properties of the card to which it is installed.
+// The prototype classes ActorBehavior and PawnBehavior provide
+// the features defined at the card object.
+
+import {PawnBehavior} from "../PrototypeBehavior";
+
+class LightPawn extends PawnBehavior {
     setup() {
-        console.log("LightPawn");
         let trm = this.service("ThreeRenderManager");
         let scene =  trm.scene;
         let camera = trm.camera;
         let group = this.shape;
+
+        if (this.actor._cardData.toneMappingExposure !== undefined) {
+            trm.renderer.toneMappingExposure = this.actor._cardData.toneMappingExposure;
+        }
 
         this.removeLights();
         this.lights = [];
@@ -33,9 +45,6 @@ class LightPawn {
         delete this.lights;
 
         if (this.csm) {
-	    for ( let i = 0; i < this.csm.lights.length; i ++ ) {
-	        this.csm.parent.remove( this.csm.lights[ i ].target );
-	    }
             this.csm.remove();
             this.csm.dispose();
             delete this.csm;
@@ -66,11 +75,20 @@ class LightPawn {
                 let TRM = this.service("ThreeRenderManager");
                 let renderer = TRM.renderer;
                 let scene = TRM.scene;
+
+                // we treat the color space of the loaded exr texture.
+                texture.colorSpace = Microverse.THREE.SRGBColorSpace;
+
                 let pmremGenerator = new Microverse.THREE.PMREMGenerator(renderer);
                 pmremGenerator.compileEquirectangularShader();
 
                 let exrCubeRenderTarget = pmremGenerator.fromEquirectangular(texture);
                 let exrBackground = exrCubeRenderTarget.texture;
+
+                // we don't set the color space for exrBackground as PMREM generator
+                // spits out purposefully
+                // srgb-linear color space and we don't necessarily override it.
+                // exrBackground.colorSpace = THREE.SRGBColorSpace;
 
                 let bg = scene.background;
                 let e = scene.environment;
@@ -79,6 +97,9 @@ class LightPawn {
                 if(e !== bg) if(bg) bg.dispose();
                 if(e) e.dispose();
                 texture.dispose();
+                if (this.actor._cardData.loadSynchronously) {
+                    this.publish(this.sessionId, "synchronousCardLoaded", {id: this.actor.id});
+                }
             });
         });
     }

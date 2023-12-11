@@ -2,12 +2,17 @@
 // https://croquet.io
 // info@croquet.io
 
-import { App } from "@croquet/worldcore-kernel";
+export { startMicroverse } from "./src/microverse.js";
+
+import { App } from "@croquet/croquet";
+import { innerHTML, fullScreenHTML, setButtonsVisibility }  from "./src/hud.js";
 
 // shared prefix for shell messages
 const PREFIX = "croquet:microverse:";
 
+let useIframe;
 let shell;
+let controller;
 // no url option => no voice, no settings and use alice avatars
 // voiceChat     => voice chat enabled, and show the initial settings
 // showSettings  => show the avatar selection but not start voice.
@@ -21,172 +26,159 @@ let localConfiguration = (showSettings ? loadLocalStorage() : null) || {};
 localConfiguration.voice = voice;
 localConfiguration.showSettings = showSettings;
 
-export function startShell() {
+export function startShell(useIframeFlag) {
+    useIframe = !!useIframeFlag;
     shell = new Shell();
+}
+
+export function setupController(fullScreenFlag) {
+    controller = new HudController();
+    if (fullScreenFlag) {
+        setupFullScreenButton();
+    }
+}
+
+export function setupFullScreenButton() {
+    let fullScreenBtn = document.querySelector("#fullScreenBtn");
+    let microverse = document.querySelector("#microverse");
+    if (!fullScreenBtn) {
+        let div = document.createElement("div");
+        div.innerHTML = fullScreenHTML;
+        fullScreenBtn = div.children[0];
+        (microverse || document.body).appendChild(fullScreenBtn);
+
+        fullScreenBtn.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            if (e.shiftKey) {
+                document.body.classList.toggle("tilt");
+                return;
+            }
+
+            if (!document.fullscreenElement) {
+                // If the document is not in full screen mode
+                // make the document full screen
+                document.body.requestFullscreen();
+            } else {
+                // Otherwise exit the full screen
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        };
+    }
+}
+
+class HudController {
+    constructor() {
+        this.hud = document.querySelector("#hud");
+        let microverse = document.querySelector("#microverse");
+
+        if (!this.hud) {
+            let div = document.createElement("div");
+            div.innerHTML = innerHTML;
+            this.hud = div.children[0];
+            (microverse || document.body).appendChild(this.hud);
+        }
+    }
 }
 
 class Shell {
     constructor() {
-        const canonicalUrl = shellToCanonicalURL(location.href);
-        if (canonicalUrl !== location.href) {
-            console.log("shell: redirecting to canonical URL", canonicalUrl);
-            location.href = canonicalUrl; // causes reload
+        if (useIframe) {
+            const canonicalUrl = shellToCanonicalURL(location.href);
+            if (canonicalUrl !== location.href) {
+                console.log("shell: redirecting to canonical URL", canonicalUrl);
+                location.href = canonicalUrl; // causes reload
+            }
+
+            // console.log("shell: starting");
+            this.frames = new Map(); // portalId => { frame, owningFrame, ownedFrames, isMicroverse, ?frameTypeArgs, ?frameTypeInterval }
+            this.portalData = new Map(); // portalId => portalData
+            this.awaitedFrameTypes = {}; // for coordinating a jump between frames
+            this.awaitedRenders = {}; // for coordinating render of primary and secondaries
+            // ensure that we have a session and password
+            App.autoSession();
+            App.autoPassword();
+            const primaryId = this.primaryFrameId = this.addFrame(null, App.sessionURL);
+            const primary = this.primaryFrame;
+            const portalURL = frameToPortalURL(primary.src, primaryId);
+            window.history.replaceState({
+                portalId: primaryId,
+            }, null, portalURL);
+            setTitle(portalURL);
+            // remove HUD from DOM in shell
+            const hud = document.getElementById("hud");
+            if (hud) {
+                hud.remove();
+            }
         }
-        // console.log("shell: starting");
-        this.frames = new Map(); // portalId => { frame, owningFrame, ownedFrames, isMicroverse, ?frameTypeArgs, ?frameTypeInterval }
-        this.portalData = new Map(); // portalId => portalData
-        this.awaitedFrameTypes = {}; // for coordinating a jump between frames
-        this.awaitedRenders = {}; // for coordinating render of primary and secondaries
-        // ensure that we have a session and password
-        App.autoSession();
-        App.autoPassword();
-        const primaryId = this.primaryFrameId = this.addFrame(null, App.sessionURL);
-        const primary = this.primaryFrame;
-        const portalURL = frameToPortalURL(primary.src, primaryId);
-        window.history.replaceState({
-            portalId: primaryId,
-        }, null, portalURL);
-        setTitle(portalURL);
-        // remove HUD from DOM in shell
-        const hud = document.getElementById("hud");
-        hud.remove();
-        const shellHud = document.getElementById("shell-hud");
-        shellHud.classList.toggle("is-shell", true);
-        // TODO: create HUD only when needed?
 
-        window.addEventListener("message", e => {
-            if (e.data?.message?.startsWith?.(PREFIX)) {
-                const cmd = e.data.message.substring(PREFIX.length);
-                for (const [portalId, { frame }] of this.frames) {
-                    if (e.source === frame.contentWindow) {
-                        this.receiveFromPortal(portalId, frame, cmd, e.data);
-                        return;
+        if (useIframe) {
+            window.addEventListener("message", e => {
+                if (e.data?.message?.startsWith?.(PREFIX)) {
+                    const cmd = e.data.message.substring(PREFIX.length);
+                    for (const [portalId, { frame }] of this.frames) {
+                        if (e.source === frame.contentWindow) {
+                            this.receiveFromPortal(portalId, frame, cmd, e.data);
+                            return;
+                        }
+                    }
+                    console.warn(`shell: ignoring ${cmd} from removed frame`);
+                }
+            });
+
+            // user used browser's back/forward buttons
+            window.addEventListener("popstate", e => {
+                let { portalId } = e.state;
+                let frame = this.frameEntry(portalId)?.frame;
+                // user may have navigated too far, try to make that work
+                if (!frame) {
+                    const portalURL = frameToPortalURL(shellToCanonicalURL(location.href));
+                    for (const [p, { frame: f }] of this.frames) {
+                        if (frameToPortalURL(f.src) === portalURL) {
+                            frame = f;
+                            portalId = p;
+                            break;
+                        }
                     }
                 }
-                console.warn(`shell: ignoring ${cmd} from removed frame`);
-            }
-        });
-
-        // user used browser's back/forward buttons
-        window.addEventListener("popstate", e => {
-            let { portalId } = e.state;
-            let frame = this.frameEntry(portalId)?.frame;
-            // user may have navigated too far, try to make that work
-            if (!frame) {
-                const portalURL = frameToPortalURL(shellToCanonicalURL(location.href));
-                for (const [p, { frame: f }] of this.frames) {
-                    if (frameToPortalURL(f.src) === portalURL) {
-                        frame = f;
-                        portalId = p;
-                        break;
-                    }
+                // if we don't have an iframe for this url, we jump there
+                // (could also try to load into an iframe but that might give us trouble)
+                if (!frame) location.reload();
+                // we have an iframe, so we enter it
+                const portalURL = frameToPortalURL(frame.src);
+                if (portalURL === shellToCanonicalURL(location.href)) {
+                    this.activateFrame(portalId, false); // false => don't push state
+                    setTitle(portalURL);
+                } else {
+                    console.warn(`shell: popstate location=${location}\ndoes not match portal-${portalId} frame.src=${frame.src}`);
                 }
-            }
-            // if we don't have an iframe for this url, we jump there
-            // (could also try to load into an iframe but that might give us trouble)
-            if (!frame) location.reload();
-            // we have an iframe, so we enter it
-            const portalURL = frameToPortalURL(frame.src);
-            if (portalURL === shellToCanonicalURL(location.href)) {
-                this.activateFrame(portalId, false); // false => don't push state
-                setTitle(portalURL);
-            } else {
-                console.warn(`shell: popstate location=${location}\ndoes not match portal-${portalId} frame.src=${frame.src}`);
-            }
-        });
-
-        this.fullscreenBtn = document.getElementById("fullscreenBtn");
-        if (this.fullscreenBtn) {
-            this.fullscreenBtn.onclick = (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-
-                if (e.shiftKey) {
-                    document.body.classList.toggle("tilt");
+            });
+        } else {
+            window.addEventListener("message", e => {
+                if (e.data?.message?.startsWith?.(PREFIX)) {
+                    const cmd = e.data.message.substring(PREFIX.length);
+                    this.receiveFromPortal(null, this, cmd, e.data);
                     return;
                 }
-
-                if (!document.fullscreenElement) {
-                    // If the document is not in full screen mode
-                    // make the document full screen
-                    document.body.requestFullscreen();
-                } else {
-                    // Otherwise exit the full screen
-                    if (document.exitFullscreen) {
-                        document.exitFullscreen();
-                    }
-                }
-            }
+            });
         }
-
-        // joystick sends events into primary frame
-        this.capturedPointers = {};
-        this.joystick = document.getElementById("joystick");
-        this.knob = document.getElementById("knob");
-        this.trackingknob = document.getElementById("trackingknob");
-
-        this.adjustJoystickKnob();
-        window.onresize = () => this.adjustJoystickKnob();
-
-        if (!document.head.querySelector("#joystick-css")) {
-            let css = document.createElement("link");
-            css.rel = "stylesheet";
-            css.type = "text/css";
-            css.id = "joystick-css";
-            css.onload = () => {
-                this.adjustJoystickKnob();
-                if (this._hudFlags) {
-                    this.setButtonsVisibility(this._hudFlags);
-                    delete this._hudFlags;
-                }
-            };
-            let root = window.microverseDir ? window.microverseDir : "./";
-            css.href = root + "assets/css/joystick.css";
-            document.head.appendChild(css);
-        }
-
-        this.releaseHandler = (e) => {
-            for (let k in this.capturedPointers) {
-                this.trackingknob.releasePointerCapture(k);
-            }
-            this.capturedPointers = {};
-            this.endMMotion(e);
-        };
-        this.trackingknob.onpointerdown = (e) => {
-            if (e.pointerId !== undefined) {
-                this.capturedPointers[e.pointerId] = "hiddenKnob";
-                this.trackingknob.setPointerCapture(e.pointerId);
-            }
-            this.startMMotion(e); // use the knob to start
-        };
-        //this.trackingknob.onpointerenter = (e) => console.log("shell: pointerEnter")
-        // this.trackingknob.onpointerleave = (e) => this.releaseHandler(e);
-        this.trackingknob.onpointermove = (e) => this.updateMMotion(e);
-        this.trackingknob.onpointerup = (e) => this.releaseHandler(e);
-        this.trackingknob.onpointercancel = (e) => this.releaseHandler(e);
-        this.trackingknob.onlostpointercapture = (e) => this.releaseHandler(e);
-    }
-
-    adjustJoystickKnob() {
-        let joystickStyle = window.getComputedStyle(this.joystick);
-        let knobStyle = window.getComputedStyle(this.knob);
-        let center = (parseFloat(joystickStyle.width) || 120) / 2;
-        let size = (parseFloat(knobStyle.width) || 60) / 2;
-        let radius = center - size;
-        this.joystickLayout = { center, size, radius };
-        this.trackingknob.style.transform = "translate(0px, 0px)"; // top-left
-        this.knob.style.transform = `translate(${center-size}px, ${center-size}px)`;
     }
 
     frameEntry(frameId) {
+        if (!useIframe) {return null;}
         return this.frames.get(frameId);
     }
 
     frameFromId(frameId) {
+        if (!useIframe) {return null;}
         return this.frameEntry(frameId)?.frame;
     }
 
     portalId(targetFrame) {
+        if (!useIframe) {return null;}
         // exhaustive search through two entries won't take long
         for (const [portalId, { frame }] of this.frames) {
             if (frame === targetFrame) return portalId;
@@ -197,6 +189,7 @@ class Shell {
     get primaryFrame() { return this.frameFromId(this.primaryFrameId) }
 
     addFrame(owningFrameId, portalURL) {
+        if (!useIframe) {return null;}
         // returns the portalId for the new frame
         if (this.frames.size >= 4) throw Error("shell: refusing to create more than 4 frames (this indicates a portal bug)");
         let portalId;
@@ -212,13 +205,15 @@ class Shell {
         };
         if (owningFrameId) this.frameEntry(owningFrameId)?.ownedFrames.add(portalId);
         this.frames.set(portalId, frameEntry);
-        document.body.appendChild(frame);
+        let microverse = document.querySelector("#microverse");
+        (microverse || document.body).appendChild(frame);
         this.sendFrameType(portalId);
         // console.log("shell: added frame", portalId, portalURL);
         return portalId;
     }
 
     removeFrame(portalId) {
+        if (!useIframe) {return;}
         // sent to secondary frame on "portal-close" message, or in activateFrame
         // if the secondary is not owned.  also sent recursively to frames owned
         // by a frame that's being removed here.
@@ -308,6 +303,7 @@ class Shell {
                 return;
             }
             case "portal-open":
+                if (!useIframe) {return;}
                 // if there already is a portalId then replace its url
                 if (data.portalId) {
                     const url = portalToFrameURL(data.portalURL, data.portalId);
@@ -331,9 +327,11 @@ class Shell {
                 }
                 return;
             case "portal-close":
+                if (!useIframe) {return;}
                 this.removeFrame(data.portalId);
                 return;
             case "portal-update":
+                if (!useIframe) {return;}
                 // the avatar in the primary world is reporting the presence and movement
                 // of a portal (eventually, potentially many portals).
                 if (fromPortalId !== this.primaryFrameId) {
@@ -371,6 +369,7 @@ class Shell {
                 }
                 return;
             case "portal-world-rendered":
+                if (!useIframe) {return;}
                 if (this.portalRenderTimeout && this.awaitedRenders[fromPortalId]) {
                     delete this.awaitedRenders[fromPortalId];
                     if (Object.keys(this.awaitedRenders).length === 0) {
@@ -381,6 +380,7 @@ class Shell {
                 }
                 return;
             case "primary-rendered":
+                if (!useIframe) {return;}
                 if (fromPortalId === this.primaryFrameId) {
                     if (this.pendingSortFrames) {
                         if (this.pendingSortFrames) {
@@ -393,6 +393,7 @@ class Shell {
                 }
                 return;
             case "portal-enter":
+                if (!useIframe) {return;}
                 if (fromPortalId === this.primaryFrameId) {
                     this.activateFrame(data.portalId, true, data.transferData); // true => push state
                 } else {
@@ -400,6 +401,7 @@ class Shell {
                 }
                 return;
             case "world-enter":
+                if (!useIframe) {return;}
                 // transferData has the same information as sent for portal-enter, plus
                 // the "following" property - a token that we use to find the leader.
                 // the url also appears as data.portalURL
@@ -415,6 +417,7 @@ class Shell {
                 }
                 return;
             case "world-replace":
+                if (!useIframe) {return;}
                 // same as world-enter except we delete the old frame first
                 if (fromPortalId === this.primaryFrameId) {
                     console.log("shell: world-replace to " + data.targetURL);
@@ -440,42 +443,43 @@ class Shell {
                 }
                 return;
             case "hud":
-                this.setButtonsVisibility(data);
+                setButtonsVisibility(data);
                 return;
             case "send-configuration":
                 // console.log("sending config", localConfiguration);
                 this.sendToPortal(fromPortalId, "local-configuration", { localConfig: localConfiguration });
                 return;
             case "update-configuration":
-                console.log("updated config", data.localConfig);
+                // console.log("updated config", data.localConfig);
                 localConfiguration = data.localConfig;
                 localConfiguration.userHasSet = true;
                 saveLocalStorage(data.localConfig);
                 return;
+            case "motion-start":
+            case "motion-end":
+            case "motion-update":
+                console.log(cmd);
+                if (!useIframe) {return;}
+                return;
+            case "local-configuration":
+                return;
+            case "frame-type":
+                if (!useIframe) {
+                    // there is a case that non-portal enabled world is visited from a portal enabled shell
+                    // And replaceWorld will have to do the right thing in both cases;
+                    // namely, when this world is visited from a portal enabled world, going to another world
+                    // means to tell the shell to go there.
+                    // When this world is visited without that, it'd do location.replace()
+                    // We record if we have received a frame-type message, and use it from replaceWorld.
+                    const { frameType } = data;
+                    const target = window.parent;
+                    window.microverseFrameTypeReceived = true;
+                    const PREFIX = "croquet:microverse:";
+                    target.postMessage({ message: PREFIX + cmd, ...frameType }, "*");
+                }
+                return;
             default:
                 console.warn(`shell: received unknown command "${cmd}" from portal-${fromPortalId}`, data);
-        }
-    }
-
-    setButtonsVisibility(data) {
-        let joystickFlag = data.joystick;
-        let fullscreenFlag = data.fullscreen;
-        if (!document.head.querySelector("#joystick-css")) {
-            this._hudFlags = {joystick: data.joystick, fullscreen: data.fullscreen};
-        }
-        if (joystickFlag !== undefined && this.joystick) {
-            if (joystickFlag) {
-                this.joystick.style.removeProperty("display");
-            } else {
-                this.joystick.style.setProperty("display", "none");
-            }
-        }
-        if (fullscreenFlag !== undefined && this.fullscreenBtn) {
-            if (fullscreenFlag) {
-                this.fullscreenBtn.style.removeProperty("display");
-            } else {
-                this.fullscreenBtn.style.setProperty("display", "none");
-            }
         }
     }
 
@@ -530,6 +534,11 @@ class Shell {
     }
 
     sendToPortal(toPortalId, cmd, data = {}) {
+        if (!useIframe) {
+            data.message = `${PREFIX}${cmd}`;
+            window.postMessage(data, "*");
+            return;
+        }
         const frame = this.frameFromId(toPortalId);
         if (frame) {
             data.message = `${PREFIX}${cmd}`;
@@ -621,21 +630,23 @@ class Shell {
 
         if (transferData && !transferData.crossingBackwards) fromFrame.style.display = 'none';
 
-        if (pushState) try {
-            window.history.pushState({
-                portalId: toPortalId,
-            }, null, portalURL);
-        } catch (e) {
-            // probably failed because portalURL has a different origin
-            // print error only if same origin
-            if (new URL(portalURL, location.href).origin === window.location.origin) {
-                console.error(e);
+        if (pushState) {
+            try {
+                window.history.pushState({
+                    portalId: toPortalId,
+                }, null, portalURL);
+            } catch (e) {
+                // probably failed because portalURL has a different origin
+                // print error only if same origin
+                if (new URL(portalURL, location.href).origin === window.location.origin) {
+                    console.error(e);
+                }
+                // we could reload the page but that would be disruptive
+                // instead, we stay on the same origin but change the URL
+                window.history.pushState({
+                    portalId: toPortalId,
+                }, null, portalToShellURL(portalURL));
             }
-            // we could reload the page but that would be disruptive
-            // instead, we stay on the same origin but change the URL
-            window.history.pushState({
-                portalId: toPortalId,
-            }, null, portalToShellURL(portalURL));
         }
         setTitle(portalURL);
         this.primaryFrameId = toPortalId;
@@ -670,54 +681,6 @@ class Shell {
             this.sendToPortal(this.primaryFrameId, "motion-start", { dx, dy });
         }
     }
-
-    // mouse motion via joystick element
-
-    startMMotion(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        this.knobX = e.clientX;
-        this.knobY = e.clientY;
-        this.activeMMotion = { dx: 0, dy: 0 };
-        this.sendToPortal(this.primaryFrameId, "motion-start");
-    }
-
-    endMMotion(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        this.activeMMotion = null;
-        let { radius } = this.joystickLayout;
-        this.trackingknob.style.transform = "translate(0px, 0px)";
-        this.knob.style.transform = `translate(${radius}px, ${radius}px)`;
-        this.sendToPortal(this.primaryFrameId, "motion-end");
-    }
-
-    updateMMotion(e) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        if (this.activeMMotion) {
-            let dx = e.clientX - this.knobX;
-            let dy = e.clientY - this.knobY;
-
-            this.sendToPortal(this.primaryFrameId, "motion-update", {dx, dy});
-            this.activeMMotion.dx = dx;
-            this.activeMMotion.dy = dy;
-
-            this.trackingknob.style.transform = `translate(${dx}px, ${dy}px)`;
-
-            let { radius } = this.joystickLayout;
-
-            let squaredDist = dx ** 2 + dy ** 2;
-            if (squaredDist > radius ** 2) {
-                let dist = Math.sqrt(squaredDist);
-                dx = radius * dx / dist;
-                dy = radius * dy / dist;
-            }
-
-            this.knob.style.transform = `translate(${radius + dx}px, ${radius + dy}px)`;
-        }
-    }
 }
 
 // each iframe's src is the portal URL plus `?portal=<portalId>`
@@ -750,6 +713,7 @@ function portalToFrameURL(portalURL, portalId) {
         return a[0] < b[0] ? -1 : 1;
     });
     url.search = new URLSearchParams(params).toString();
+
     return url.toString();
 }
 
@@ -809,19 +773,22 @@ function setTitle(url) {
 }
 
 function loadLocalStorage() {
-    if (!window.localStorage) { return null; }
     try {
+        if (!window.localStorage) { return null; }
         let localSettings = JSON.parse(window.localStorage.getItem('microverse-settings'));
         if (!localSettings || localSettings.version !== "1") {
             throw new Error("different version of data");
         }
         return localSettings;
-    } catch (e) { return null; }
+    } catch (e) {
+        console.log("localStorage is not avaialble");
+        return null;
+    }
 }
 
 function saveLocalStorage(configuration) {
-    if (!window.localStorage) { return; }
     try {
+        if (!window.localStorage) { return; }
         let {nickname, type, avatarURL, handedness} = configuration;
         let settings = {
             version: "1",
@@ -831,5 +798,7 @@ function saveLocalStorage(configuration) {
             handedness
         };
         window.localStorage.setItem('microverse-settings', JSON.stringify(settings));
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        console.log("localStorage is not avaialble");
+    }
 }

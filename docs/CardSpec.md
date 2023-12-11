@@ -270,12 +270,35 @@ When it is "text", the card becomes a text area.
 When it is "code", it creates a text area but has some more functionality to support in world code editing.
 When it is "object" or `undefined`, custom behavior code is expected to set the cards' visual appearance.
 
---- 
+---
+
+### Name
+
+`hidden`
+
+### Category
+
+visual
+
+
+### Type
+
+```TypeScript
+boolean|undefined
+```
+
+### Description
+The value specifies whether the root of the Three.js objects for the card to have the `visible` flag set or not. The value defaults to false (that is the visible flag to be true).
+
+When the hidden flag is true, the card also stops responding pointer events.
+
+---
 
 ### Name
 `dataLocation`
 
 ### Category
+
 visual
 
 ### Type
@@ -393,6 +416,26 @@ Color|undefined
 ### Description
 
 When the "type" is "2d", the value is used for the edge of the 2D card.
+
+---
+
+### Name
+
+`alphaTest`
+
+### Category
+
+visual
+
+### Type
+
+```TypeScript
+number|undefined
+```
+
+### Description
+
+When the "type" is "2d" and "textureType" is "image", and "alphaTest" is defined, the value is used for the alphaTest property of the resulting material for the image. This is useful when you need to show a transparent PNG in the world.
 
 ---
 
@@ -790,6 +833,24 @@ boolean?
 When there is a card with type "2d" or "3d" and with the property "loadSynchronously" set to be true, and also the SynchrnousCardLoader behavior module is attached to a card in the system, the system sends synchronousLoadCardsStarted and allSynnchronousCardsLoaded events. See the details in `behaviors/default/synchronousLoad.js` for more details.
 
 ---
+
+### Name
+
+`toneMappingExposure`
+
+### Category
+
+visual
+
+### Type
+
+```TypeScript
+number
+```
+
+### Description
+
+When specified for a light, the default implementation of lights uses the value to set the toneMappingExposure property of THREE.js renderer to control the brightness of the over all scene. The system uses 1.4 as default.
 
 ## Code Properties
 

@@ -12,10 +12,12 @@ rm -rf ${DIST}/assets/fonts
 rm -rf ${DIST}/assets/avatar-images
 rm -rf ${DIST}/assets/SVG
 rm -rf ${DIST}/assets/images
-rm -rf ${DIST}/assets/src
 
 mkdir -p ${DIST}/assets/fonts
-cp -rp assets/fonts/css assets/fonts/webfonts assets/fonts/Roboto* assets/fonts/Poppins*.woff2 ${DIST}/assets/fonts
+cp -rp assets/fonts/Roboto* assets/fonts/Poppins*.woff2 ${DIST}/assets/fonts
+
+mkdir -p ${DIST}/assets/avatar-animations
+cp -rp assets/avatar-animations ${DIST}/assets/
 
 rm -rf ${DIST}/apps
 rm -rf ${DIST}/docs
@@ -27,7 +29,8 @@ cp apiKey.js-example ${DIST}/apiKey.js-example
 rm -rf ${DIST}/behaviors
 mkdir -p ${DIST}/behaviors/default
 cp -rp behaviors/croquet ${DIST}/behaviors
-cp -p behaviors/default/csmLights.js ${DIST}/behaviors/default/csmLights.js
+cp -p behaviors/default/lights.js ${DIST}/behaviors/default/lights.js
+cp -p behaviors/PrototypeBehavior.d.ts ${DIST}/behaviors/PrototypeBehavior.d.ts
 
 rm -rf ${DIST}/worlds
 mkdir -p ${DIST}/worlds

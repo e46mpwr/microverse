@@ -2,14 +2,17 @@
 // https://croquet.io
 // info@croquet.io
 
-import * as WorldcoreExports from "@croquet/worldcore-kernel";
-const {ViewService, ModelService, GetPawn, Model, Constants} = WorldcoreExports;
+import * as WorldcoreExports from "./worldcore";
+const {ViewService, ModelService, GetPawn, Model, Constants, App} = WorldcoreExports;
 
 import * as WorldcoreThreeExports from "./ThreeRender.js";
 import * as PhysicsExports from "./physics.js";
 import * as FrameExports from "./frame.js";
+import {WorldSaver} from "./worldSaver.js";
 
-//console.log(WorldcoreRapierExports);
+import {TSCompiler, JSCompiler} from "./compiler.js";
+
+let compiledBehaviors = new Map(); // <ScriptingBehavior, {$behavior, $behaviorName}
 
 let isProxy = Symbol("isProxy");
 function newProxy(object, handler, module, behavior) {
@@ -58,8 +61,11 @@ function getViewRoot() {
 export const AM_Code = superclass => class extends superclass {
     init(options) {
         super.init(options);
-        this.scriptListeners = new Map();
         this.behaviorManager = this.service("BehaviorModelManager");
+        this.scriptListeners = new Map();
+    }
+
+    initBehaviors(options) {
         if (options.behaviorModules) {
             options.behaviorModules.forEach((name) => { /* name: Bar */
                 let module = this.behaviorManager.modules.get(name);
@@ -111,7 +117,8 @@ export const AM_Code = superclass => class extends superclass {
 
     future(time) {
         if (!this[isProxy]) {return super.future(time);}
-        let behaviorName = this._behavior.$behaviorName;
+        let compiled = this._behavior.getCompiledBehavior();
+        let behaviorName = compiled.$behaviorName;
         let moduleName = this._behavior.module.externalName;
         return this.futureWithBehavior(time, moduleName, behaviorName);
     }
@@ -133,7 +140,9 @@ export const AM_Code = superclass => class extends superclass {
             get(_target, property) {
                 let behavior = behaviorManager.lookup(moduleName, behaviorName);
 
-                let func = property === "call" ? basicCall : behavior.$behavior[property];
+                let compiled = behavior.getCompiledBehavior();
+
+                let func = property === "call" ? basicCall : compiled.$behavior[property];
                 let fullName = property === "call" ?  "call" : `${moduleName}$${behaviorName}.${property}`;
                 if (typeof func === "function") {
                     const methodProxy = new Proxy(func, {
@@ -219,12 +228,19 @@ export const AM_Code = superclass => class extends superclass {
         if (!behaviorModules) {return false;}
         if (!behaviorModules.includes(module)) {return false;}
 
-        if (!behaviorName) {return false;}
+        if (!behaviorName) {return true;}
 
         let behavior = behaviorManager.lookup(module, behaviorName);
         if (!behavior) {return false;}
+
+        let $behavior;
+        if (isActor) {
+            $behavior = behavior.ensureBehavior().$behavior
+        } else {
+            $behavior = behavior.ensureBehavior().$behavior;
+        }
         if (!maybeMethod) {return true;}
-        return !!behavior.$behavior[maybeMethod];
+        return !!$behavior[maybeMethod];
     }
 
     // setup() of a behavior, and typically a subscribe call in it, gets called multiple times
@@ -272,7 +288,7 @@ export const AM_Code = superclass => class extends superclass {
         }
 
         if (!behaviorName && behavior) {
-            behaviorName = behavior.$behaviorName;
+            behaviorName = behavior.getCompiledBehavior().$behaviorName;
         }
 
         let fullMethodName;
@@ -373,7 +389,7 @@ export const AM_Code = superclass => class extends superclass {
     }
 }
 
-/* AM_Code: A mixin to support Live programming */
+/* PM_Code: A mixin to support Live programming */
 
 export const PM_Code = superclass => class extends superclass {
     constructor(actor) {
@@ -391,14 +407,14 @@ export const PM_Code = superclass => class extends superclass {
                 if (pawnBehaviors) {
                     for (let behavior of pawnBehaviors.values()) {
                         if (behavior) {
-                            behavior.ensureBehavior();
+                            let {$behavior, $behaviorName} = behavior.ensureBehavior();
+                            // future(0) is used so that setup() is called after
+                            // all behaviors specified are installed.
+                            if ($behavior.setup) {
+                                this.future(0).callSetup(`${module.externalName}$${$behaviorName}`);
+                            }
                         }
-                        // future(0) is used so that setup() is called after
-                        // all behaviors specified are installed.
-                        if (behavior.$behavior.setup) {
-                            this.future(0).callSetup(`${module.externalName}$${behavior.$behaviorName}`);
-                        }
-                    };
+                    }
                 }
             });
         }
@@ -446,8 +462,9 @@ export const PM_Code = superclass => class extends superclass {
                 let {pawnBehaviors} = module;
                 if (pawnBehaviors) {
                     for (let behavior of pawnBehaviors.values()) {
-                        if (behavior.$behavior.teardown) {
-                            this.call(`${behavior.module.externalName}$${behavior.$behaviorName}`, "teardown");
+                        let {$behavior, $behaviorName} = behavior.ensureBehavior();
+                        if ($behavior.teardown) {
+                            this.call(`${behavior.module.externalName}$${$behaviorName}`, "teardown");
                         }
                     };
                 }
@@ -534,7 +551,7 @@ export const PM_Code = superclass => class extends superclass {
         }
 
         if (!behaviorName && behavior) {
-            behaviorName = behavior.$behaviorName;
+            behaviorName = behavior.getCompiledBehavior().$behaviorName;
         }
 
         let fullMethodName;
@@ -599,7 +616,7 @@ export const PM_Code = superclass => class extends superclass {
 // so there is one instance of ScriptBehavior for each defined behavior.
 
 class ScriptingBehavior extends Model {
-    static okayToIgnore() { return [ "$behavior", "$behaviorName" ]; }
+    // static okayToIgnore() { return [ "$behavior", "$behaviorName" ]; }
 
     init(options) {
         this.systemBehavior = !!options.systemBehavior;
@@ -609,16 +626,10 @@ class ScriptingBehavior extends Model {
         this.location = options.location;
     }
 
-    setCode(string) {
+    compileBehavior(string) {
         if (!string) {
-            console.log("code is empty for ", this);
-            return;
+            string = this.code;
         }
-
-        let theSame = this.code === string;
-
-        this.code = string;
-
         let trimmed = string.trim();
         let source;
         if (trimmed.length === 0) {return;}
@@ -629,8 +640,8 @@ class ScriptingBehavior extends Model {
         let code = `return (${source}) //# sourceURL=${window.location.origin}/behaviors_evaled/${this.location}/${this.name}`;
         let cls;
         try {
-            const Microverse = {...WorldcoreExports, ...WorldcoreThreeExports, ...PhysicsExports, ...FrameExports, RAPIER: PhysicsExports.Physics, getViewRoot};
-            cls = new Function("Worldcore", "Microverse", code)(Microverse, Microverse);
+            const Microverse = {...WorldcoreExports, ...WorldcoreThreeExports, ...PhysicsExports, ...FrameExports, RAPIER: PhysicsExports.Physics, getViewRoot, WorldSaver};
+            cls = new Function("Microverse", code)(Microverse);
         } catch(error) {
             console.log("error occured while compiling:", source, error);
             try {
@@ -643,34 +654,57 @@ class ScriptingBehavior extends Model {
             return;
         }
 
-        this.$behavior = cls.prototype;
-        this.$behaviorName = cls.name;
+        return cls;
+    }
 
-        if (!theSame) {
-            this.publish(this.id, "setCode", string);
+    getCompiledBehavior() {
+        return compiledBehaviors.get(this);
+    }
+
+    setCode(string, forView) {
+        if (!string) {
+            console.log("code is empty for ", this);
+            return;
         }
+
+        let theSame = this.code === string;
+        let cls = this.compileBehavior(string);
+        let result = {$behavior: cls.prototype, $behaviorName: cls.name};
+        compiledBehaviors.set(this, result);
+
+        if (forView) {
+            if (!theSame) {
+                throw Error("view cannot specify new code");
+            }
+        } else {
+            if (!theSame) {
+                this.code = string;
+                this.publish(this.id, "setCode", string);
+            }
+        }
+        return result;
     }
 
     ensureBehavior() {
-        if (!this.$behavior) {
-            let maybeCode = this.code;
-            this.setCode(maybeCode);
+        let entry = compiledBehaviors.get(this);
+        if (!entry) {
+            let cls = this.compileBehavior();
+            entry = {$behavior: cls.prototype, $behaviorName: cls.name};
+            compiledBehaviors.set(this, entry);
         }
-        return this.$behavior;
+        return entry;
     }
 
     invoke(receiver, name, ...values) {
-        this.ensureBehavior();
-        let myHandler = this.$behavior;
-        let behaviorName = this.$behaviorName;
+        let {$behavior, $behaviorName} = this.ensureBehavior();
         let module = this.module;
         let result;
 
-        let proxy = newProxy(receiver, myHandler, module, this);
+        let proxy = newProxy(receiver, $behavior, module, this);
         try {
             let prop = proxy[name];
             if (typeof prop === "undefined") {
-                throw new Error(`a method named ${name} not found in ${behaviorName || this}`);
+                throw new Error(`a method named ${name} not found in ${$behaviorName || this}`);
             }
             if (typeof prop === "function") {
                 result = prop.apply(proxy, values);
@@ -678,7 +712,8 @@ class ScriptingBehavior extends Model {
                 result = prop;
             }
         } catch (e) {
-            console.error(`an error occured in ${behaviorName}.${name}() on`, receiver, e);
+            console.error(`an error occured in ${$behaviorName}.${name}() on`, receiver, e);
+            App.messages && App.showMessage(`Error in ${$behaviorName}.${name}()`, { level: "error" });
         }
         return result;
     }
@@ -774,12 +809,10 @@ export class BehaviorModelManager extends ModelService {
         if (!module) {return null;}
         let b = module.actorBehaviors.get(behaviorName);
         if (b) {
-            b.ensureBehavior();
             return b;
         }
         b = module.pawnBehaviors.get(behaviorName);
         if (b) {
-            b.ensureBehavior();
             return b;
         }
         return null;
@@ -953,7 +986,7 @@ export class BehaviorModelManager extends ModelService {
 
         let toPublish = [];
         changed.forEach((behavior) => {
-            if (!behavior.$behavior.setup) {return;}
+            if (!behavior.getCompiledBehavior().$behavior.setup) {return;}
             if (behavior.type === "actorBehavior") {
                 let modelUsers = this.modelUses.get(behavior);
                 let actorManager = this.service("ActorManager");
@@ -966,7 +999,7 @@ export class BehaviorModelManager extends ModelService {
                     });
                 }
             } else if (behavior.type === "pawnBehavior") {
-                toPublish.push([behavior.module.externalName, behavior.$behaviorName]);
+                toPublish.push([behavior.module.externalName, behavior.getCompiledBehavior().$behaviorName]);
             }
         });
         this.publish(this.id, "callViewSetupAll", toPublish);
@@ -1001,8 +1034,8 @@ export class BehaviorModelManager extends ModelService {
         if (array.indexOf(modelId) < 0) {
             array.push(modelId);
             behavior.ensureBehavior();
-            if (behavior.$behavior.setup) {
-                behavior.future(0).invoke(model[isProxy] ? model._target : model, "setup");
+            if (behavior.getCompiledBehavior().$behavior.setup) {
+                behavior.invoke(model[isProxy] ? model._target : model, "setup");
             }
         }
     }
@@ -1014,7 +1047,8 @@ export class BehaviorModelManager extends ModelService {
         let ind = array.indexOf(modelId);
         if (ind < 0) {return;}
         array.splice(ind, 1);
-        if (behavior.$behavior && behavior.$behavior.teardown) {
+        let compiled = behavior.getCompiledBehavior();
+        if (compiled && compiled.$behavior.teardown) {
             behavior.future(0).invoke(model[isProxy] ? model._target : model, "teardown");
         }
     }
@@ -1030,9 +1064,9 @@ export class BehaviorModelManager extends ModelService {
             array.push(modelId);
         }
 
-        behavior.ensureBehavior();
-        if (behavior.$behavior.setup) {
-            model.say("callSetup", `${behavior.module.externalName}$${behavior.$behaviorName}`);
+        let {$behavior, $behaviorName} = behavior.ensureBehavior();
+        if ($behavior.setup) {
+            model.say("callSetup", `${behavior.module.externalName}$${$behaviorName}`);
         }
     }
 
@@ -1043,8 +1077,9 @@ export class BehaviorModelManager extends ModelService {
         let ind = array.indexOf(modelId);
         if (ind < 0) {return;}
         array.splice(ind, 1);
-        if (behavior.$behavior && behavior.$behavior.teardown) {
-            model.say("callTeardown", `${behavior.module.externalName}$${behavior.$behaviorName}`);
+        let compiled = behavior.getCompiledBehavior();
+        if (compiled && compiled.$behavior.teardown) {
+            model.say("callTeardown", `${behavior.module.externalName}$${compiled.$behaviorName}`);
         }
     }
 }
@@ -1070,6 +1105,7 @@ export class BehaviorViewManager extends ViewService {
             this.callback(false);
         }
         this.setURL(null);
+        compiledBehaviors = new Map();
         super.destroy();
     }
 
@@ -1145,9 +1181,7 @@ export class BehaviorViewManager extends ViewService {
 
         let systemModuleMap = new Map();
 
-        let dataURLs = [];
         let promises = [];
-        let scripts = [];
 
         if (!window._allResolvers) {
             window._allResolvers = new Map();
@@ -1162,86 +1196,64 @@ export class BehaviorViewManager extends ViewService {
         array.forEach((obj) => {
             // {action, name, content, systemModule} = obj;
             if (obj.action === "add") {
+                delete obj.action;
                 systemModuleMap.set(obj.name, obj.systemModule);
-                let id = Math.random().toString();
-                let promise = new Promise((resolve, _reject) => {
-                    current.set(id, resolve);
-                    let script = document.createElement("script");
-                    scripts.push(script);
-                    script.type = "module";
-                    let dataURL = URL.createObjectURL(new Blob([obj.content], {type: "application/javascript"}));
-                    script.innerHTML = `
-import * as data from "${dataURL}";
-let map = window._allResolvers.get("${key}");
-if (map) {map.get("${id}")({data, key: ${key}, name: "${obj.name}"});}
-`;
-                    document.body.appendChild(script);
-                    dataURLs.push(dataURL);
-                }).catch((e) => {console.log(e); return null});
-                promises.push(promise);
+                let modPromise = compileToModule(obj.content, obj.name)
+                    .catch((e) => {console.log(e); return null;});
+                promises.push(modPromise);
             }
         });
 
         Promise.all(promises).then(async (allData) => {
-            dataURLs.forEach((url) => URL.revokeObjectURL(url));
-            scripts.forEach((s) => s.remove());
             allData = allData.filter((o) => o);
             if (allData.length === 0) {return;}
 
-            let keys = [...window._allResolvers.keys()];
+            // probably it needs to check if another loop is underway
 
-            let index = keys.indexOf(key);
-            window._allResolvers.delete(key);
+            let library = new CodeLibrary();
+            allData.forEach((obj) => {
+                let dot = obj.name.lastIndexOf(".");
+                let location = obj.name.slice(0, dot);
+                let isSystem = obj.name.startsWith("croquet");
 
-            if (index !== keys.length - 1) {
-                // if it is not the last element,
-                // there was already another call so discard it
-            } else {
-                let library = new CodeLibrary();
-                allData.forEach((obj) => {
-                    let dot = obj.name.lastIndexOf(".");
-                    let location = obj.name.slice(0, dot);
-                    let isSystem = obj.name.startsWith("croquet");
-
-                    if (!obj || checkModule(obj.data)) {
-                        throw new Error("a behavior file does not export an array of modules");
-                    }
-
-                    library.add(obj.data.default, location, isSystem);
-                });
-
-                let sendBuffer = [];
-                let key = Math.random();
-
-                for (let [_k, m] of library.modules) {
-                    let {actorBehaviors, pawnBehaviors, name, location, systemModule} = m;
-                    sendBuffer.push({
-                        name, systemModule, location,
-                        actorBehaviors: [...actorBehaviors],
-                        pawnBehaviors: [...pawnBehaviors]
-                    });
-                };
-
-                let string = JSON.stringify(sendBuffer);
-                let array = new TextEncoder().encode(string);
-                let ind = 0;
-
-                this.publish(this.model.id, "loadStart", key);
-                let throttle = array.length > 80000;
-
-                while (ind < array.length) {
-                    let buf = array.slice(ind, ind + 2880);
-                    this.publish(this.model.id, "loadOne", {key, buf});
-                    ind += 2880;
-                    if (throttle) {
-                        await new Promise((resolve) => {
-                            setTimeout(resolve, 5);
-                        });
-                    }
+                if (!obj || checkModule(obj.data)) {
+                    throw new Error("a behavior file does not export an array of modules");
                 }
 
-                this.publish(this.model.id, "loadDone", key);
+                library.add(obj.data.default, location, isSystem);
+            });
+
+            let sendBuffer = [];
+            let key = Math.random();
+
+            for (let [_k, m] of library.modules) {
+                let {actorBehaviors, pawnBehaviors, name, location, systemModule} = m;
+                sendBuffer.push({
+                    name, systemModule, location,
+                    actorBehaviors: [...actorBehaviors],
+                    pawnBehaviors: [...pawnBehaviors]
+                });
+            };
+
+            let string = JSON.stringify(sendBuffer);
+            let array = new TextEncoder().encode(string);
+            let ind = 0;
+
+            this.publish(this.model.id, "loadStart", key);
+            let throttle = array.length > 80000;
+
+            while (ind < array.length) {
+                let buf = array.slice(ind, ind + 2880);
+                this.publish(this.model.id, "loadOne", {key, buf});
+                ind += 2880;
+                if (throttle) {
+                    await new Promise((resolve) => {
+                        setTimeout(resolve, 16);
+                    });
+                }
             }
+
+            this.publish(this.model.id, "loadDone", key);
         });
     }
 }
@@ -1255,7 +1267,7 @@ export class CodeLibrary {
         this.classes = new Map();
     }
 
-    add(library, location, isSystem) {
+    add(library, location, isSystem, language) {
         if (library.modules) {
             library.modules.forEach(module => {
                 let {name, actorBehaviors, pawnBehaviors} = module;
@@ -1281,7 +1293,8 @@ export class CodeLibrary {
                     location,
                     actorBehaviors: actors,
                     pawnBehaviors: pawns,
-                    systemModule: isSystem
+                    systemModule: isSystem,
+                    language: language
                 });
             });
         }
@@ -1345,3 +1358,24 @@ export function checkModule(module) {
     });
 }
 
+export async function compileToModule(text, path) {
+    let language = path.endsWith(".ts") ? "ts" : "js";
+
+    let jsCompiler;
+    let tsCompiler;
+
+    jsCompiler = new JSCompiler();
+    let js = await jsCompiler.compile(text, path);
+
+    if (language === "ts") {
+        tsCompiler = new TSCompiler();
+        js = await tsCompiler.compile(js, path);
+    }
+
+    let dataURL = URL.createObjectURL(new Blob([js], {type: "application/javascript"}));
+    return eval(`import("${dataURL}")`).then((mod) => {
+        return {name: path, data: mod};
+    }).finally(() => {
+        URL.revokeObjectURL(dataURL);
+    });
+}

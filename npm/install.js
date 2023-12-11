@@ -70,10 +70,12 @@ function main() {
         console.log("starting to copy files", process.cwd());
         copyFolderRecursiveSync(`behaviors${sep}croquet`, `${dist}${sep}behaviors`);
         copyFolderRecursiveSync(`behaviors${sep}default`, `${dist}${sep}behaviors`, true);
+        copyFileSync(`behaviors${sep}PrototypeBehavior.d.ts`, `${dist}${sep}behaviors${sep}PrototypeBehavior.d.ts`);
         copyFolderRecursiveSync("assets", dist);
         copyFolderRecursiveSync("worlds", dist, true);
         copyFolderRecursiveSync("meta", dist);
         copyFolderRecursiveSync("lib", dist);
+        copyFileSync("prelude.js", `${dist}${sep}prelude.js`, true);
         copyFileSync("index.html", `${dist}${sep}index.html`);
         copyFileSync("apiKey.js-example", `${dist}${sep}apiKey.js-example`);
         copyFileSync("gitignore", `${dist}${sep}.gitignore`, true);
